@@ -30,6 +30,12 @@
 ;; want to explicitly save to a file, but we might want to recover
 ;; across sessions.
 
+;; TODO: docs
+;; TODO: persistent counter
+;; TODO: rules for ignoring in recentf
+;; TODO: if consult, then preview file in scratch-open?
+;; TODO: better filenames
+
 ;;; Code:
 
 (defgroup scratch nil
@@ -41,12 +47,11 @@
   (expand-file-name "scratch/" user-emacs-directory)
   "Folder in which to store scratch files.")
 
+;; TODO persist this in file
 (defvar scratch--count 0)
 
 (defun scratch--buffer-name (file-extension)
   (format "scratch-%d.%s" scratch--count file-extension))
-
-;; (time-convert nil 'integer)
 
 (defun scratch--expand-filename (file-name)
   (let ((default-directory scratch-directory))
@@ -65,9 +70,7 @@
     (with-current-buffer buffer
       (when scratch-mode
         (unless (file-exists-p scratch-directory)
-          (message "SCRATCHDEBUG: creating scratch folder")
           (make-directory scratch-directory t))
-        (message "SCRATCHDEBUG: saving buffer %s" (buffer-name))
         (write-region (point-min)
                       (point-max)
                       (scratch--expand-filename (buffer-name)))))))
@@ -94,9 +97,7 @@
   :group 'scratch
   (if scratch-global-mode
       (progn
-        ;; (add-hook 'kill-buffer-hook #'scratch--save)
         (add-hook 'kill-emacs-hook #'scratch--save-all))
-    ;; (remove-hook 'kill-buffer-hook #'scratch--save)
     (remove-hook 'kill-emacs-hook #'scratch--save-all)))
 
 ;;;###autoload
