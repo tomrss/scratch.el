@@ -39,33 +39,50 @@
 ;;; Code:
 
 (defgroup scratch nil
-  "Welcome buffer."
+  "Scratch management."
   :group 'convenience
   :prefix "scratch-")
 
 (defcustom scratch-directory
   (expand-file-name "scratch/" user-emacs-directory)
-  "Folder in which to store scratch files.")
+  "Folder in which to store scratch files."
+  :group 'scratch
+  :type 'string)
+
+(defcustom scratch-find-file-function
+  'find-file
+  "Function used for finding scratch files."
+  :group 'scratch
+  :type 'function)
 
 ;; TODO persist this in file
 (defvar scratch--count 0)
 
 (defun scratch--buffer-name (file-extension)
+  "Get the name of a scratch buffer based on FILE-EXTENSION."
   (format "scratch-%d.%s" scratch--count file-extension))
 
-(defun scratch--expand-filename (file-name)
+(defun scratch--expand-filename (buffer-name)
+  "File name of scratch buffer named BUFFER-NAME."
   (let ((default-directory scratch-directory))
     (expand-file-name (format "%d_%s"
                               (time-convert nil 'integer)
-                              file-name))))
+                              buffer-name))))
 
 (defun scratch--buffer-mode (buffer-name)
+  "Major mode of buffer named BUFFER-NAME.
+
+Major mode is determined by matching with `auto-mode-alist'."
   (cdr (assoc buffer-name auto-mode-alist #'string-match)))
 
 (defun scratch--count (operation)
+  "TODO."
   (setq scratch--count (funcall operation scratch--count 1)))
 
 (defun scratch--save (&optional scratch-buffer)
+  "Save a SCRATCH-BUFFER as file.
+
+SCRATCH-BUFFER defaults to the current buffer."
   (let ((buffer (or scratch-buffer (current-buffer))))
     (with-current-buffer buffer
       (when scratch-mode
@@ -76,6 +93,7 @@
                       (scratch--expand-filename (buffer-name)))))))
 
 (defun scratch--save-all ()
+  "Save all scratch buffers."
   (dolist (buffer (buffer-list))
     (when (buffer-local-value 'scratch-mode buffer)
       (scratch--save buffer))))
@@ -102,8 +120,12 @@
 
 ;;;###autoload
 (defun scratch-named (buffer-name)
-  "TODO"
+  "Create new scratch buffer named BUFFER-NAME.
+
+Major mode of scratch buffer is determined from BUFFER-NAME
+using `auto-mode-alist'."
   (interactive "MScratch name: ")
+  ;; TODO check existing buffer and rename
   (with-current-buffer (get-buffer-create buffer-name)
     (funcall (scratch--buffer-mode buffer-name))
     (scratch-mode +1)
@@ -112,16 +134,16 @@
 
 ;;;###autoload
 (defun scratch (file-extension)
-  "TODO."
+  "Create new scratch buffer with extension FILE-EXTENSION.
+
+Major mode of scratch buffer is determined from FILE-EXTENSION
+using `auto-mode-alist'."
   (interactive "MAuto mode extension: ")
   (scratch-named (scratch--buffer-name file-extension)))
 
-(defcustom scratch-find-file-function
-  'find-file
-  "asdasd")
-
 ;;;###autoload
 (defun scratch-open ()
+  "Open a scratch buffer from a previeous session."
   (interactive)
   (let ((default-directory scratch-directory))
     (call-interactively scratch-find-file-function)))
