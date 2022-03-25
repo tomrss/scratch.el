@@ -31,7 +31,6 @@
 ;; across sessions.
 
 ;; TODO: docs
-;; TODO: persistent counter
 ;; TODO: rules for ignoring in recentf
 ;; TODO: if consult, then preview file in scratch-open?
 ;; TODO: better filenames
@@ -55,19 +54,20 @@
   :group 'scratch
   :type 'function)
 
-;; TODO persist this in file
-(defvar scratch--count 0)
+(defcustom scratch-persist-excluded-modes nil
+  "Major modes to exclude from persisting when `scratch-persist-mode' is active"
+  :group 'scratch
+  :type 'list)
 
-(defun scratch--buffer-name (file-extension)
-  "Get the name of a scratch buffer based on FILE-EXTENSION."
-  (format "scratch-%d.%s" scratch--count file-extension))
+(defcustom scratch-unique-buffer-name-fn
+  'scratch-unique-buffer-name
+  "TODO"
+  :group 'scratch
+  :type 'function)
 
 (defun scratch--expand-filename (buffer-name)
   "File name of scratch buffer named BUFFER-NAME."
-  (let ((default-directory scratch-directory))
-    (expand-file-name (format "%d_%s"
-                              (time-convert nil 'integer)
-                              buffer-name))))
+  (expand-file-name buffer-name scratch-directory))
 
 (defun scratch--buffer-mode (buffer-name)
   "Major mode of buffer named BUFFER-NAME.
@@ -75,17 +75,14 @@
 Major mode is determined by matching with `auto-mode-alist'."
   (cdr (assoc buffer-name auto-mode-alist #'string-match)))
 
-(defun scratch--count (operation)
-  "TODO."
-  (setq scratch--count (funcall operation scratch--count 1)))
-
 (defun scratch--save (&optional scratch-buffer)
   "Save a SCRATCH-BUFFER as file.
 
 SCRATCH-BUFFER defaults to the current buffer."
   (let ((buffer (or scratch-buffer (current-buffer))))
     (with-current-buffer buffer
-      (when scratch-mode
+      (when (and scratch-mode
+                 (not (memq major-mode scratch-persist-excluded-modes)))
         (unless (file-exists-p scratch-directory)
           (make-directory scratch-directory t))
         (write-region (point-min)
@@ -98,48 +95,64 @@ SCRATCH-BUFFER defaults to the current buffer."
     (when (buffer-local-value 'scratch-mode buffer)
       (scratch--save buffer))))
 
+(defun scratch-unique-buffer-name (buffer-name)
+  "Unique name for the scratch buffer based on BUFFER-NAME"
+  (let ((base (file-name-sans-extension buffer-name))
+        (ext (file-name-extension buffer-name)))
+    (concat base
+            "_"
+            (format-time-string "%Y-%m-%dT%H-%M-%S")
+            (when ext
+              (concat "." ext)))))
+
 ;;;###autoload
 (define-minor-mode scratch-mode
   "Minor mode for scratch buffers."
   :global nil
-  :group 'scratch
-  (if scratch-mode
-      (progn
-        (add-hook 'kill-buffer-hook #'scratch--save nil t))
-    (remove-hook 'kill-buffer-hook #'scratch--save t)))
+  :group 'scratch)
 
 ;;;###autoload
-(define-minor-mode scratch-global-mode
-  "Global minor mode for managing scratch buffers."
+(define-minor-mode scratch-persist-mode
+  "Global minor mode for persisting scratch buffers."
   :global t
   :group 'scratch
-  (if scratch-global-mode
+  (if scratch-persist-mode
       (progn
+        (add-hook 'kill-buffer-hook #'scratch--save)
         (add-hook 'kill-emacs-hook #'scratch--save-all))
+    (remove-hook 'kill-buffer-hook #'scratch--save)
     (remove-hook 'kill-emacs-hook #'scratch--save-all)))
 
 ;;;###autoload
 (defun scratch-named (buffer-name)
-  "Create new scratch buffer named BUFFER-NAME.
-
-Major mode of scratch buffer is determined from BUFFER-NAME
-using `auto-mode-alist'."
+  "Create new scratch buffer named BUFFER-NAME."
   (interactive "MScratch name: ")
-  ;; TODO check existing buffer and rename
-  (with-current-buffer (get-buffer-create buffer-name)
+  (with-current-buffer (get-buffer-create
+                        (funcall scratch-unique-buffer-name-fn buffer-name))
     (funcall (scratch--buffer-mode buffer-name))
-    (scratch-mode +1)
-    (scratch--count '+))
+    (scratch-mode +1))
   (switch-to-buffer buffer-name))
 
 ;;;###autoload
-(defun scratch (file-extension)
-  "Create new scratch buffer with extension FILE-EXTENSION.
-
-Major mode of scratch buffer is determined from FILE-EXTENSION
-using `auto-mode-alist'."
-  (interactive "MAuto mode extension: ")
-  (scratch-named (scratch--buffer-name file-extension)))
+(defun scratch (mode &optional buffer-name)
+  (interactive
+   (list
+    (intern
+     (completing-read
+      "Major mode: "
+      (delete-dups (mapcar 'cdr auto-mode-alist))))
+    (when current-prefix-arg
+      (read-string "Scratch buffer name: "))))
+  ;; refactor this ugly buffer name handling
+  (let ((unique-buffer-name
+         (funcall scratch-unique-buffer-name-fn
+                  (or buffer-name "scratch"))))
+    (with-current-buffer (get-buffer-create unique-buffer-name)
+      (funcall mode)
+      (add-file-local-variable-prop-line 'mode mode)
+      (goto-char (point-max))
+      (scratch-mode +1))
+    (switch-to-buffer unique-buffer-name)))
 
 ;;;###autoload
 (defun scratch-open ()
