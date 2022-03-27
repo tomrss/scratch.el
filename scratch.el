@@ -31,7 +31,6 @@
 ;; other.  This package helps dealing whith such common tasks and also
 ;; (optionally) to persist scratch buffers for later sessions.
 
-;; TODO: delete oldest scratches
 ;; TODO: do not save empty scratches
 ;; TODO: implement open last function
 
@@ -60,7 +59,7 @@
   :group 'scratch
   :type 'function)
 
-(defcustom scratch-persist-history-limit 100
+(defcustom scratch-history-limit 100
   "Limit number of scratch buffers to be saved."
   :group 'scratch
   :type 'integer)
@@ -70,7 +69,7 @@
   :group 'scratch
   :type 'list)
 
-(defcustom scratch-persist-sorting-predicate
+(defcustom scratch-sorting-predicate
   'scratch-sort-by-progressive
   "Predicate using for sorting saved scratches.
 
@@ -79,44 +78,64 @@ The predicate accepts two file and attribute cons (as returned by
   :group 'scratch
   :type 'function)
 
+(defcustom scratch-search-fn
+  'scratch-grep
+  "Grep-like command for searching in scratch files."
+  :group 'scratch
+  :type 'function)
+
+;; TODO probably too dangerous to make customizable
+(defconst scratch--file-name-regexp "^\\(.*\\)\\-\\-\\([0-9]+\\)\\(\\..*\\)?\\'"
+  "Regex for matching scratch files.")
+
 ;;;###autoload
 (define-minor-mode scratch-mode
   "Minor mode for scratch buffers."
   :global nil
   :group 'scratch)
 
+(defun scratch--parse-progressive (file-name)
+  "Parse scratch progressive from FILE-NAME."
+  (if (string-match scratch--file-name-regexp file-name)
+      (string-to-number (match-string 2 file-name))
+    -1))
+
 (defun scratch-sort-by-modification-time (x y)
   "Sorting predicate based on file modification time for files/attrs X and Y."
   (time-less-p (file-attribute-modification-time (cdr y))
                (file-attribute-modification-time (cdr x))))
-
-(defun scratch--parse-progressive (filename)
-  ;; TODO: this regex is duplicated in another function, don't have time right now
-  ;; TODO: always use this for parsing progressive
-  (if (string-match "^\\(.*\\)\\-\\-\\([0-9]+\\)\\(\\..*\\)?\\'" filename)
-      (string-to-number (match-string 2 filename))
-    -1))
 
 (defun scratch-sort-by-progressive (x y)
   "Sorting predicate based on scratch progressive for files/attrs X and Y."
   (> (scratch--parse-progressive (car x))
      (scratch--parse-progressive (car y))))
 
-(defun scratch--saved-list ()
+(defun scratch--list-saved ()
+  "List saved scratch files sorted with `scratch-sorting-predicate'."
   (sort (directory-files-and-attributes scratch-directory
                                         'full
-                                        "^\\([^.]\\|\\.[^.]\\|\\.\\..\\)"
+                                        scratch--file-name-regexp
                                         'nosort)
-        scratch-persist-sorting-predicate))
+        scratch-sorting-predicate))
 
 (defun scratch--check-delete-oldest ()
-  (let ((scratches (scratch--saved-list)))
-    (message "not implemented!")))
+  "Check if some old scratch files have to be deleted.
 
-(defun scratch--save (&optional scratch-buffer)
+Deleted files are the oldest (in the sense of `scratch-sorting-predicate') ones
+who exceed `scratch-history-limit'."
+  (let* ((scratches (scratch--list-saved))
+         (total (length scratches))
+         (exceeding (- total scratch-history-limit)))
+    (when (> exceeding 0)
+      (dolist (to-delete (last scratches exceeding))
+        (delete-file (car to-delete)))
+      (message "Deleted %d old scratch files." exceeding))))
+
+(defun scratch-save (&optional scratch-buffer)
   "Save a SCRATCH-BUFFER as file.
 
 SCRATCH-BUFFER defaults to the current buffer."
+  (interactive)
   (let ((buffer (or scratch-buffer (current-buffer))))
     (with-current-buffer buffer
       (when (and scratch-mode
@@ -128,11 +147,12 @@ SCRATCH-BUFFER defaults to the current buffer."
                       (expand-file-name (buffer-name) scratch-directory))
         (scratch--check-delete-oldest)))))
 
-(defun scratch--save-all ()
+(defun scratch-save-all ()
   "Save all scratch buffers."
+  (interactive)
   (dolist (buffer (buffer-list))
     (when (buffer-local-value 'scratch-mode buffer)
-      (scratch--save buffer))))
+      (scratch-save buffer))))
 
 (defun scratch--append-to-file-name (file-name &rest sequences)
   "Append SEQUENCES to FILE-NAME respecting FILE-NAME extension."
@@ -143,33 +163,23 @@ SCRATCH-BUFFER defaults to the current buffer."
             (when extension
               (concat "." extension)))))
 
-(defun scratch--get-file-progressive (file-name-regexp match-group)
-  "Get progressive from saved scratches.
-
-Progressive is extracted from MATCH-GROUP of files in `scratch-directory'
-matching FILE-NAME-REGEXP."
+(defun scratch--max-file-progressive ()
+  "Get max progressive from saved scratches."
   (if-let ((progressives
             (mapcar
-             (lambda (file)
-               (when (string-match file-name-regexp file)
-                 (string-to-number (match-string match-group file))))
-             (directory-files scratch-directory nil file-name-regexp))))
+             #'scratch--parse-progressive
+             (directory-files scratch-directory nil scratch--file-name-regexp))))
       (apply #'max progressives)
     -1))
 
-(defun scratch--get-buffer-progressive (file-name-regexp match-group)
-  "Get progressive from current scratch buffers.
-
-Progressive is extracted from MATCH-GROUP of buffers whose name matches
-FILE-NAME-REGEXP."
+(defun scratch--max-buffer-progressive ()
+  "Get max progressive from current scratch buffers."
   (if-let ((progressives
             (remove nil
                     (mapcar
                      (lambda (buffer)
                        (when (buffer-local-value 'scratch-mode buffer)
-                         (let ((buf-name (buffer-name buffer)))
-                           (when (string-match file-name-regexp buf-name)
-                             (string-to-number (match-string match-group buf-name))))))
+                         (scratch--parse-progressive (buffer-name buffer))))
                      (buffer-list)))))
       (apply #'max progressives)
     -1))
@@ -178,36 +188,17 @@ FILE-NAME-REGEXP."
   "Get a unique name for new scratch buffer based on BUFFER-NAME.
 
 A progressive is computed and added (respecting file extension) to BUFFER-NAME."
-  ;; at the moment I find dangerous to put this in custom
-  (let ((file-regexp "^\\(.*\\)\\-\\-\\([0-9]+\\)\\(\\..*\\)?\\'")
-        (match-group 2))
-    (scratch--append-to-file-name
-     buffer-name
-     "--"
-     (number-to-string
-      (+ 1 (max (scratch--get-file-progressive file-regexp match-group)
-                (scratch--get-buffer-progressive file-regexp match-group)))))))
+  (scratch--append-to-file-name
+   buffer-name
+   ;; TODO: this separator is too closely related to used regex
+   "--"
+   (number-to-string
+    (+ 1 (max (scratch--max-file-progressive)
+              (scratch--max-buffer-progressive))))))
 
 (defun scratch-major-mode-list ()
   "Return list of major modes defined in `auto-mode-alist'."
   (delete-dups (mapcar 'cdr auto-mode-alist)))
-
-;;;###autoload
-(define-minor-mode scratch-persist-mode
-  "Global minor mode for persisting scratch buffers.
-
-When this global mode is active, scratch buffers will be automatically saved in
-`scratch-directory' when they are killed on when Emacs is closed."
-  :global t
-  :group 'scratch
-  (if scratch-persist-mode
-      (progn
-        (unless (file-exists-p scratch-directory)
-          (make-directory scratch-directory t))
-        (add-hook 'kill-buffer-hook #'scratch--save)
-        (add-hook 'kill-emacs-hook #'scratch--save-all))
-    (remove-hook 'kill-buffer-hook #'scratch--save)
-    (remove-hook 'kill-emacs-hook #'scratch--save-all)))
 
 (defun scratch--buffer-mode (buffer-name)
   "Major mode of buffer named BUFFER-NAME.
@@ -216,20 +207,34 @@ Major mode is determined by matching with `auto-mode-alist'."
   (cdr (assoc buffer-name auto-mode-alist #'string-match)))
 
 ;;;###autoload
-(defun scratch-named (buffer-name)
-  "Create new scratch buffer with unique name based on BUFFER-NAME.
+(defun scratch-titled (file-name)
+  "Create new scratch buffer with unique name based on FILE-NAME.
 
 The major mode will be determined by matching `auto-mode-alist' with
-BUFFER-NAME."
-  (interactive "MScratch name: ")
-  (let ((scratch-buffer-name (scratch--unique-name buffer-name)))
+FILE-NAME."
+  (interactive "MScratch filename: ")
+  (let ((scratch-buffer-name (scratch--unique-name file-name)))
     (with-current-buffer (get-buffer-create scratch-buffer-name)
-      (funcall (scratch--buffer-mode buffer-name))
+      (funcall (scratch--buffer-mode file-name))
+      (goto-char (point-min))
+      (insert "Title: ")
+      (insert file-name)
+      (when comment-start
+        (comment-line 1))
+      (goto-char (point-max))
+      (newline)
+      (insert "Time-stamp: <>")
+      (when comment-start
+        (comment-line 1))
+      (goto-char (point-max))
+      (newline)
+      (newline)
+      (time-stamp)
       (scratch-mode +1))
     (switch-to-buffer scratch-buffer-name)))
 
 ;;;###autoload
-(defun scratch (mode &optional buffer-name)
+(defun scratch-new (mode &optional buffer-name)
   "Create new scratch buffer with major mode MODE.
 
 If BUFFER-NAME is specified, the scratch name will have a unique name based on
@@ -247,10 +252,12 @@ BUFFER-NAME can be specified via universal argument."
                                     (concat string-mode-name "-" "scratch")))))
     (with-current-buffer (get-buffer-create scratch-buffer-name)
       (funcall mode)
-      ;; cannot put directly `mode' in file local: in that case, when opening
-      ;; file emacs will try to load with an extra -mode (e.g. c++-mode-mode)
-      (add-file-local-variable-prop-line 'mode (intern string-mode-name))
-      (goto-char (point-max))
+      (unless (eq 'fundamental-mode mode)
+        ;; cannot put directly `mode' in file local: in that case, when opening
+        ;; file emacs will try to load with an extra -mode (e.g. c++-mode-mode)
+        (add-file-local-variable-prop-line 'mode (intern string-mode-name))
+        (goto-char (point-max))
+        (newline))
       (scratch-mode +1))
     (switch-to-buffer scratch-buffer-name)))
 
@@ -260,6 +267,44 @@ BUFFER-NAME can be specified via universal argument."
   (interactive)
   (let ((default-directory scratch-directory))
     (call-interactively scratch-find-file-fn)))
+
+(defun scratch-grep (regexp)
+  "Grep REGEXP in scratch files."
+  (interactive "MRegexp: ")
+  (let ((default-directory scratch-directory))
+    (lgrep regexp "*")))
+
+;;;###autoload
+(defun scratch-search ()
+  "Grep-like search in scratch files."
+  (interactive)
+  (let ((default-directory scratch-directory))
+    (call-interactively scratch-search-fn)))
+
+;;;###autoload
+(define-minor-mode scratch-persist-mode
+  "Global minor mode for persisting scratch buffers.
+
+When this global mode is active, scratch buffers will be automatically saved in
+`scratch-directory' when they are killed on when Emacs is closed."
+  :global t
+  :group 'scratch
+  (if scratch-persist-mode
+      (progn
+        (unless (file-exists-p scratch-directory)
+          (make-directory scratch-directory t))
+        (add-hook 'kill-buffer-hook #'scratch-save)
+        (add-hook 'kill-emacs-hook #'scratch-save-all))
+    (remove-hook 'kill-buffer-hook #'scratch-save)
+    (remove-hook 'kill-emacs-hook #'scratch-save-all)))
+
+(eval-and-compile
+  (define-prefix-command 'scratch-key-map))
+
+(define-key scratch-key-map (kbd "n") #'scratch-new)
+(define-key scratch-key-map (kbd "t") #'scratch-titled)
+(define-key scratch-key-map (kbd "o") #'scratch-open)
+(define-key scratch-key-map (kbd "r") #'scratch-search)
 
 (provide 'scratch)
 ;;; scratch.el ends here
