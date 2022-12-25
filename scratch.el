@@ -42,7 +42,7 @@
   :prefix "scratch-")
 
 (defcustom scratch-directory
-  (expand-file-name "scratch/" user-emacs-directory)
+  (locate-user-emacs-file "scratch/")
   "Folder in which to store scratch files."
   :group 'scratch
   :type 'string)
