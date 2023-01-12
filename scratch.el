@@ -298,6 +298,7 @@ When this global mode is active, scratch buffers will be automatically saved in
     (remove-hook 'kill-buffer-hook #'scratch-save)
     (remove-hook 'kill-emacs-hook #'scratch-save-all)))
 
+;;;###autoload (autoload 'scratch-key-map "scratch" nil nil 'keymap)
 (eval-and-compile
   (define-prefix-command 'scratch-key-map))
 
