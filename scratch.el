@@ -298,5 +298,13 @@ When this global mode is active, scratch buffers will be automatically saved in
     (remove-hook 'kill-buffer-hook #'scratch-save)
     (remove-hook 'kill-emacs-hook #'scratch-save-all)))
 
+(eval-and-compile
+  (define-prefix-command 'scratch-key-map))
+
+(define-key scratch-key-map (kbd "n") #'scratch-new)
+(define-key scratch-key-map (kbd "t") #'scratch-titled)
+(define-key scratch-key-map (kbd "o") #'scratch-open)
+(define-key scratch-key-map (kbd "r") #'scratch-search)
+
 (provide 'scratch)
 ;;; scratch.el ends here
