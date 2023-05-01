@@ -31,4 +31,4 @@ No function is bound to any key, you can do it yourself.
 
 ** Customization
 
-See the =welcome= customization group.
+See the =scratch= customization group.
