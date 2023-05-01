@@ -1,0 +1,34 @@
+#+title: scratch.el
+#+author: Tommaso Rossi
+
+Scratch buffers in Emacs.
+A "scratch" buffer is a temporary buffer used for holding copy-paste content,
+for writing quick notes, for writing and evaluating some piece of code, or
+other.  This package helps dealing whith such common tasks and also
+(optionally) to persist scratch buffers for later sessions.
+
+** Usage
+
+This package is not on Melpa so can installed via git-based package manager like =straight.el=:
+
+#+begin_src emacs-lisp
+  (straight-use-package '(scratch-el :type git
+                                     :host github
+                                     :repo "tomrss/scratch.el"))
+
+  ;; automatically persist scratch buffers
+  (with-eval-after-load 'scratch
+    (scratch-persist-mode +1))
+#+end_src
+
+** Commands
+
+- =scratch-new=. Create new scratch buffer, major mode will be prompted.
+- =scratch-titled=. Create new scratch buffer with a filename title, major mode will be decided from filename (via =auto-mode-alist=).
+- =scratch-open=. Open previously persisted scratch buffer.
+
+No function is bound to any key, you can do it yourself.
+
+** Customization
+
+See the =welcome= customization group.
